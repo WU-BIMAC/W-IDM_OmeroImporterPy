@@ -81,8 +81,8 @@ p_userEmail = "userEmail"
 p_adminsEmail = "adminsEmail"
 p_emailFrom = "senderEmail"
 p_emailFromPSW = "sendEmailPSW"
-p_endTimeHr = "endTimeHr"
-p_endTimeMin = "endTimeMin"
+p_startTime = "startTime"
+p_endTime = "endTime"
 p_key = "key"
 
 import_status = "import"
@@ -870,6 +870,9 @@ def main(argv, argc):
             "-b2 <endpoint#bucketName#appKeyId#appKey>, to use backblaze as destination for copy (conflict with -d)"
         )
         print(
+            "-ts <hh:mm>, to specify the daily start time of the application, default is non-stop"
+        )
+        print(
             "-te <hh:mm>, to specify the time limit after which the application should auto terminate, default is non-stop"
         )
         print("*-sml <email address> to set up automatic email sender")
@@ -922,6 +925,8 @@ def main(argv, argc):
     hostName = None
     port = 4064
     target = None
+    startTimeHr = None
+    startTimeMin = None
     endTimeHr = None
     endTimeMin = None
     adminsEmailTo = None
@@ -1026,6 +1031,18 @@ def main(argv, argc):
             emailFrom = argv[i + 1]
         elif arg == "-smlp":
             emailFromPSW = argv[i + 1]
+        elif arg == "-ts":
+            teData = argv[i + 1]
+            teDataSplit = teData.split(":")
+            if (len(teDataSplit) < 2) or (len(teDataSplit) > 2):
+                error = (
+                    "wrong number of arguments in -ts option, application terminated."
+                )
+                writeToLog("ERROR: " + error)
+                printToConsole("ERROR: " + error)
+                quit()
+            startTimeHr = teDataSplit[0]
+            startTimeMin = teDataSplit[1]
         elif arg == "-te":
             teData = argv[i + 1]
             teDataSplit = teData.split(":")
@@ -1072,9 +1089,10 @@ def main(argv, argc):
             dict[p_b2_appKey] = f.encrypt(bytes(b2AppKey_g, "utf8")).decode()
         # if startTime != None:
         #     dict[p_startTime] = startTime
+        if startTimeHr != None and startTimeMin != None:
+            dict[p_startTime] = str(startTimeHr) + ":" + str(startTimeMin)
         if endTimeHr != None and endTimeMin != None:
-            dict[endTimeHr] = endTimeHr
-            dict[endTimeMin] = endTimeMin
+            dict[p_endTime] = str(endTimeHr) + ":" + str(endTimeMin)
         dict[p_adminsEmail] = adminsEmailTo
         dict[p_emailFrom] = f.encrypt(bytes(emailFrom, "utf8")).decode()
         dict[p_emailFromPSW] = f.encrypt(bytes(emailFromPSW, "utf8")).decode()
@@ -1162,10 +1180,14 @@ def main(argv, argc):
             emailFrom = str(f.decrypt(value).decode())
         if key == p_emailFromPSW:
             emailFromPSW = str(f.decrypt(value).decode())
-        if key == p_endTimeHr:
-            endTimeHr = value
-        if key == p_endTimeMin:
-            endTimeMin = value
+        if key == p_startTime:
+            vals = value.split(":")
+            startTimeHr = vals[0]
+            startTimeMin = vals[1]
+        if key == p_endTime:
+            vals = value.split(":")
+            endTimeHr = vals[0]
+            endTimeMin = vals[1]
     printToConsole("GLOBAL CONFIG READ")
 
     if emailFrom == None:
@@ -1215,6 +1237,38 @@ def main(argv, argc):
     #     printToConsole("ERROR: " + error)
     #     sendErrorEmail(emailTo, adminsEmailTo, error, emailFrom, emailFromPSW)
     #     quit()
+
+    startTimeHrI = None
+    startTimeMinI = None
+    if startTimeHr != None:
+        try:
+            if int(startTimeHr) == startTimeHr:
+                startTimeHrI = int(startTimeHr)
+        except TypeError as e:
+            error = "Hour value for start time is not a valid number, application terminated."
+            writeToLog("ERROR: " + error)
+            writeToLog(repr(e))
+            printToConsole("ERROR: " + error)
+            printToConsole(repr(e))
+            sendErrorEmail(
+                emailTo, adminsEmailTo, error + repr(e), emailFrom, emailFromPSW
+            )
+            quit()
+
+    if startTimeMin != None:
+        try:
+            if int(startTimeMin) == startTimeMin:
+                startTimeMinI = int(startTimeMin)
+        except TypeError as e:
+            error = "Minute value for start time is not a valid number, application terminated."
+            writeToLog("ERROR: " + error)
+            writeToLog(repr(e))
+            printToConsole("ERROR: " + error)
+            printToConsole(repr(e))
+            sendErrorEmail(
+                emailTo, adminsEmailTo, error + repr(e), emailFrom, emailFromPSW
+            )
+            quit()
 
     endTimeHrI = None
     endTimeMinI = None
@@ -1522,7 +1576,7 @@ def main(argv, argc):
             secure=True,
         )
         omeConnUser = conn.getUser()
-        omeConnUserName = omeUser.getName()
+        omeConnUserName = omeConnUser.getName()
         if conn == None:
             error = "Connection error"
             writeToLog("ERROR: " + error)
@@ -1534,10 +1588,15 @@ def main(argv, argc):
         omeUserName = None
         userConn = None
         # userConn = None
-        if omeConnUser.lower() != userFolder.lower() and isAdmin and conn.isFullAdmin():
+        if omeConnUserName.lower() != userFolder.lower() and isAdmin:
             if conn.isFullAdmin():
-                omeUser = conn.getObject("Experimenter", attributes={"omeName": userFolder})
+                omeUser = conn.getObject(
+                    "Experimenter", attributes={"omeName": userFolder}
+                )
                 omeUserName = omeUser.getName()
+                omeUserPSW = omeUser.getLdap()
+                print("OME USER PSW :  " + str(omeUserPSW))
+                quit()
                 # userConn = conn.suConn(omeUser.getName())
                 if emailTo == None:
                     emailTo = omeUser.getEmail()
@@ -2096,6 +2155,20 @@ def main(argv, argc):
                                 + ")"
                             )
                             hasNewImport = True
+
+                        if (
+                            startTimeHr != None
+                            and startTimeMin != None
+                            and endTimeHr != None
+                            and endTimeMin != None
+                        ):
+                            now = datetime.now()
+                            if now.hour < startTimeHr and now.hour > endTimeHr:
+                                endTimePassed = True
+                            if now.hour == endTimeHr and now.minute > endTimeMin:
+                                endTimePassed = True
+                            if now.hour == startTimeHr and now.minute < startTimeMin:
+                                endTimePassed = True
 
                         if omeUserName != None:
                             userConn.close()
