@@ -98,14 +98,16 @@ metadata_images = "images"
 metadata_image_name = "Image_Name"
 metadata_image_new_name = "New_Image_Name"
 metadata_image_path = "Image_Path"
-metadata_image_tags = "Tags"
+metadata_image_mma = "MMA_File_Path"
+metadata_image_tags1 = "Tags"
+metadata_image_tags2 = "Τags"
 
 excel_module_ome = "OMERO specific"
-excel_project = "Project"
+excel_project = 0
 excel_projectName = "Project_Name"
-excel_dataset = "Dataset"
+excel_dataset = 1
 excel_datasetName = "Dataset_Name"
-excel_imageList = "Image-List"
+excel_imageList = 2
 excel_module = "Module"
 excel_key = "Key"
 excel_value = "Value"
@@ -669,7 +671,10 @@ def readCSVFile(path):
                         for key in keys:
                             value = dataSplit[i]
                             i = i + 1
-                            if key == metadata_image_tags:
+                            if (
+                                key == metadata_image_tags1
+                                or key == metadata_image_tags2
+                            ):
                                 if value == "":
                                     tags = []
                                 else:
@@ -765,7 +770,7 @@ def parseImageListSpreadsheetData(ssData):
             if key == excel_replaceNaN:
                 continue
             value = ssData[key][i]
-            if key == metadata_image_tags:
+            if key == metadata_image_tags1 or key == metadata_image_tags2:
                 if value == excel_replaceNaN:
                     value = []
                 else:
@@ -821,7 +826,7 @@ def collectMetadataFromExcel(path):
         name = path.name
         if ".xlsx" in name or ".xlsm" in name:
             ssFileProjectData = pd.read_excel(
-                path, sheet_name=excel_project, header=9
+                path, sheet_name=excel_project, header=8
             ).fillna(excel_replaceNaN)
             ssProjectData = parseSpreadsheetData(ssFileProjectData, excel_projectName)
             projectName = list(ssProjectData.keys())[0]
@@ -831,7 +836,7 @@ def collectMetadataFromExcel(path):
             if metadata_datasets not in data[projectName]:
                 data[projectName][metadata_datasets] = {}
             ssFileDatasetData = pd.read_excel(
-                path, sheet_name=excel_dataset, header=9
+                path, sheet_name=excel_dataset, header=8
             ).fillna(excel_replaceNaN)
             ssDatasetData = parseSpreadsheetData(ssFileDatasetData, excel_datasetName)
             datasetName = list(ssDatasetData.keys())[0]
@@ -881,12 +886,12 @@ def main(argv, argc):
             "*-aml <email address1#email address2:...> to set up automatic email to admin upon error or completion"
         )
         print("#####")
-        print("*-u <user userName>")
-        print("*-psw <user password>")
         print(
             "-ucfg <userDirectory> <options> to create a user config file in a specific directory, conflicting user options override global options"
         )
         print("options (* required):")
+        print("*-u <user userName>")
+        print("*-psw <user password>")
         print(
             "-d <destination>, destination directory where to move files after import (in this case if not specified copy does not happen)"
         )
@@ -1575,6 +1580,7 @@ def main(argv, argc):
             group="",
             secure=True,
         )
+
         omeConnUser = conn.getUser()
         omeConnUserName = omeConnUser.getName()
         if conn == None:
@@ -1583,7 +1589,11 @@ def main(argv, argc):
             printToConsole("ERROR: " + error)
             sendErrorEmail(emailTo, adminsEmailTo, error, emailFrom, emailFromPSW)
             quit()
+        printToConsole("Connected")
+        printToConsole(str(conn))
         conn.c.enableKeepAlive(60)
+        # conn.close(True)
+        # quit()
 
         omeUserName = None
         userConn = None
@@ -1642,12 +1652,11 @@ def main(argv, argc):
                     emailFromPSW,
                 )
             except Exception as e:
-                writeToLog(error)
                 writeToLog(repr(e))
                 sendErrorEmail(
                     emailTo,
                     adminsEmailTo,
-                    error + "\n" + repr(e),
+                    repr(e),
                     emailFrom,
                     emailFromPSW,
                 )
@@ -1960,8 +1969,14 @@ def main(argv, argc):
                         imageName = image[metadata_image_name]
                         imageNewName = image[metadata_image_new_name]
                         imagePath = image[metadata_image_path]
-                        imageTags = image[metadata_image_tags]
-
+                        imageTags = None
+                        if metadata_image_tags1 in image:
+                            imageTags = image[metadata_image_tags1]
+                        elif metadata_image_tags2 in image:
+                            imageTags = image[metadata_image_tags2]
+                        else:
+                            # TODO issue, raise
+                            imageTags = []
                         # imageFolderPath = image["Image_Path"]
                         # imagePath = os.path.join(imageFolderPath, imageName)
 
@@ -2091,7 +2106,9 @@ def main(argv, argc):
                             if (
                                 imgAnnKey == metadata_image_new_name
                                 or imgAnnKey == metadata_image_path
-                                or imgAnnKey == metadata_image_tags
+                                or imgAnnKey == metadata_image_mma
+                                or imgAnnKey == metadata_image_tags1
+                                or imgAnnKey == metadata_image_tags2
                             ):
                                 continue
                             imageKeyValueData.append([imgAnnKey, str(image[imgAnnKey])])
@@ -2192,6 +2209,7 @@ def main(argv, argc):
         )
 
         conn.close()
+        printToConsole("Close connection")
         if endTimePassed:
             break
 
